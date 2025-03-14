@@ -19,6 +19,7 @@
   let activePopup = null; // Tracks currently open pop-up
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY; // Google Maps API key
+  const apiID = import.meta.env.VITE_GOOGLE_MAPS_ID;
 
   // Define dark mode styles for the map
   const darkModeStyles = [
@@ -513,7 +514,7 @@ function closePopup() {
         center: { lat: 50.4452, lng: -104.6189 },
         zoom: 12,
         disableDefaultUI: false,
-        mapId: "17e495c2de124fef",
+        mapId: apiID,
         gestureHandling: "greedy"
       });
 
