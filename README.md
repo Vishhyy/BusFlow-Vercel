@@ -44,6 +44,7 @@ Create a `.env` file in the project root and add your API keys:
 ```env
 VITE_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
 VITE_API_URL=https://your-api-endpoint.com
+VITE_GOOGLE_MAPS_ID=your_google_maps_id
 ```
 
 ### **4 Start Development Server**
