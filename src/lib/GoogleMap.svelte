@@ -1,25 +1,26 @@
 <script>
-  import { onMount } from "svelte";
-  import * as GoogleMapsLoader from "@googlemaps/js-api-loader";
-  import { loadGTFSData } from "$lib/processGTFS.js";
-  import RouteSidebar from "$lib/RouteSidebar.svelte";
+    // Import necessary modules and components
+    import { onMount } from "svelte";
+    import * as GoogleMapsLoader from "@googlemaps/js-api-loader";
+    import { loadGTFSData } from "$lib/processGTFS.js";
+    import RouteSidebar from "$lib/RouteSidebar.svelte";
 
-
-
+  // Define global variables
   let map;
   let isSidebarOpen = false;
   let selectedRoutes = [];
-  let busMarkers = {};
-  let routePolylines = {};
-  let previousBusPositions = {};
-  let arrowMarkers = {};
+  let busMarkers = {}; // Stores bus marker elements
+  let routePolylines = {}; // Stores route polylines for visibility toggling
+  let previousBusPositions = {}; // Stores previous bus positions for smooth animation
+  let arrowMarkers = {}; // Stores directional arrow markers for buses
   let isDarkMode = false;
-  let stopMarkers = {}; // ✅ Store stop markers
-  let stopOverlays = [];
-  let activePopup = null; // Track the currently open pop-up
+  let stopMarkers = {}; // Stores bus stop markers
+  let stopOverlays = []; // Stores stop overlays
+  let activePopup = null; // Tracks currently open pop-up
 
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY; // Google Maps API key
 
+  // Define dark mode styles for the map
   const darkModeStyles = [
     { elementType: "geometry", stylers: [{ color: "#212121" }] },
     { elementType: "labels.text.stroke", stylers: [{ color: "#212121" }] },
@@ -28,96 +29,87 @@
     { featureType: "water", elementType: "geometry", stylers: [{ color: "#0e1626" }] }
   ];
 
-  const lightModeStyles = [];
+  const lightModeStyles = []; // Light mode styles (default)
 
+  // Toggle between dark mode and light mode
   function toggleMapStyle() {
     isDarkMode = !isDarkMode;
     map.setOptions({ styles: isDarkMode ? darkModeStyles : lightModeStyles });
   }
 
+  // Opens the sidebar for a selected route
   function openSidebar(routeId) {
     isSidebarOpen = true;
     selectedRoutes = [routeId];
   }
 
+  // Closes the sidebar
   function closeSidebar() {
     isSidebarOpen = false;
   }
 
-  const routeColors = {}; // Store assigned colors to prevent duplicates
+  // Stores assigned route colors to ensure consistency
+  const routeColors = {};
 
-  // Predefined high-contrast, readable colors
+  // Predefined high-contrast, readable colors for bus routes
   const highContrastColors = [
-      "#FF5733", // Bright Red
-      "#33FF57", // Bright Green
-      "#3357FF", // Bright Blue
-      "#FF33A8", // Hot Pink
-      "#FFD700", // Gold
-      "#FF8C00", // Dark Orange
-      "#8A2BE2", // Blue Violet
-      "#20B2AA", // Light Sea Green
-      "#DC143C", // Crimson
-      "#00FA9A", // Medium Spring Green
-      "#FF4500", // Orange Red
-      "#7FFF00", // Chartreuse
-      "#1E90FF", // Dodger Blue
-      "#FF1493", // Deep Pink
-      "#32CD32", // Lime Green
-      "#9932CC", // Dark Orchid
-      "#4682B4", // Steel Blue
-      "#DAA520", // Goldenrod
-      "#FF6347", // Tomato
-      "#40E0D0"  // Turquoise
+    "#FF5733", "#33FF57", "#3357FF", "#FF33A8", "#FFD700", "#FF8C00", "#8A2BE2",
+    "#20B2AA", "#DC143C", "#00FA9A", "#FF4500", "#7FFF00", "#1E90FF", "#FF1493",
+    "#32CD32", "#9932CC", "#4682B4", "#DAA520", "#FF6347", "#40E0D0"
   ];
 
+
+  // Assigns a color to a route number, ensuring consistency
   function getBusColor(routeNumber) {
-      if (!routeColors[routeNumber]) {
-          // Assign a unique high-contrast color
-          routeColors[routeNumber] = highContrastColors[routeNumber % highContrastColors.length];
-      }
-      return routeColors[routeNumber];
+    if (!routeColors[routeNumber]) {
+      routeColors[routeNumber] = highContrastColors[routeNumber % highContrastColors.length];
+    }
+    return routeColors[routeNumber];
   }
 
+  // Toggles visibility of a bus route on the map
   async function toggleRouteVisibility(routeId, google) {
-      try {
-          const data = await loadGTFSData();
-          const shapeMap = data.shapeMap;
-          const routeToShapeMap = data.routeToShapeMap;
+    try {
+      const data = await loadGTFSData();
+      const shapeMap = data.shapeMap;
+      const routeToShapeMap = data.routeToShapeMap;
 
-          if (!routeToShapeMap[routeId]) {
-              console.warn(`❌ No shape ID found for route ${routeId}`);
-              return;
-          }
-
-          const shapeIds = routeToShapeMap[routeId];
-          const routeColor = getBusColor(parseInt(routeId)); // ✅ Use high-contrast route color
-
-          if (routePolylines[routeId]) {
-              routePolylines[routeId].forEach(polyline => polyline.setMap(null));
-              delete routePolylines[routeId];
-          } else {
-              routePolylines[routeId] = [];
-
-              shapeIds.forEach(shapeId => {
-                  if (!shapeMap[shapeId]) return;
-
-                  const polyline = new google.maps.Polyline({
-                      path: shapeMap[shapeId],
-                      geodesic: true,
-                      strokeColor: routeColor, // ✅ Use matching high-contrast color
-                      strokeOpacity: 1.0,
-                      strokeWeight: 4,
-                      map: map,
-                  });
-
-                  routePolylines[routeId].push(polyline);
-              });
-          }
-      } catch (error) {
-          console.error("❌ Error toggling route visibility:", error);
+      if (!routeToShapeMap[routeId]) {
+        console.warn(`❌ No shape ID found for route ${routeId}`);
+        return;
       }
+
+      const shapeIds = routeToShapeMap[routeId];
+      const routeColor = getBusColor(parseInt(routeId));
+
+      if (routePolylines[routeId]) {
+        // Remove existing polylines
+        routePolylines[routeId].forEach(polyline => polyline.setMap(null));
+        delete routePolylines[routeId];
+      } else {
+        // Draw new polylines
+        routePolylines[routeId] = [];
+        shapeIds.forEach(shapeId => {
+          if (!shapeMap[shapeId]) return;
+
+          const polyline = new google.maps.Polyline({
+            path: shapeMap[shapeId],
+            geodesic: true,
+            strokeColor: routeColor,
+            strokeOpacity: 1.0,
+            strokeWeight: 4,
+            map: map,
+          });
+
+          routePolylines[routeId].push(polyline);
+        });
+      }
+    } catch (error) {
+      console.error("❌ Error toggling route visibility:", error);
+    }
   }
 
+  // Updates Arrow direction of Buses
   function updateArrowDirection(arrowMarker, heading, color) {
     const arrowCanvas = document.createElement("canvas");
     arrowCanvas.width = 24;
@@ -137,11 +129,13 @@
     arrowMarker.content = arrowCanvas;
   }
 
+  // Updates Bus Position w/ new position
   function updateBusPosition(marker, newPosition) {
     if (!marker || !newPosition) return;
     marker.position = new google.maps.LatLng(newPosition.lat, newPosition.lng);
   }
 
+  // Creates bus icon for Fetched buses
   function createBusIcon(routeNumber, color, heading) {
     const canvas = document.createElement("canvas");
     canvas.width = 50;
@@ -180,35 +174,23 @@
     return canvas;
   }
 
+  // Fetch available bus routes for a specific stop
   async function fetchAvailableRoutes(stopId) {
     try {
-        console.log(`🔍 Fetching routes for stop: ${stopId}`);
+      console.log(`🔍 Fetching routes for stop: ${stopId}`);
+      const apiUrl = `https://stark-headland-53423-ad8df5faf2c9.herokuapp.com/api/bus-timings?stop=${stopId}&routes=all&lim=3&skip=0&ws=0`;
+      const response = await fetch(apiUrl);
+      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
 
-        const apiUrl = `https://stark-headland-53423-ad8df5faf2c9.herokuapp.com/api/bus-timings?stop=${stopId}&routes=all&lim=3&skip=0&ws=0`;
-        console.log("API Call:", apiUrl);
-
-        const response = await fetch(apiUrl);
-        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-
-        const data = await response.json();
-        console.log(`🚌 Routes for Stop ${stopId}:`, data);
-
-        if (!data || data.length === 0) {
-            return [];
-        }
-
-        // ✅ Extract unique **route_id** instead of `route_short_name`
-        const uniqueRoutes = [...new Set(data.map(bus => bus.route_id))];
-        console.log(`✅ Extracted Route IDs for Stop ${stopId}:`, uniqueRoutes);
-
-        return uniqueRoutes;
+      const data = await response.json();
+      return [...new Set(data.map(bus => bus.route_id))]; // Extract unique route IDs
     } catch (error) {
-        console.error("Error fetching available routes:", error);
-        return [];
+      console.error("Error fetching available routes:", error);
+      return [];
     }
   }
 
-
+  // Shows Bus Times Pop-up when another api will be implemented
   function showBusTimesPopup(busTimesHtml) {
     let popup = document.getElementById("bus-times-popup");
 
@@ -240,15 +222,7 @@
   //     if (popup) popup.style.display = "none";
   // }
 
-
-
-
-
-
-
-
-
-
+  // Fetches Bus Timings from old API(Expired/Unimplemented) As of March 14, 2025
   async function fetchBusTimes(stopId, routeId) {
     try {
         console.log(`🛠 Fetching bus times for Stop ID: ${stopId}, Route ID: ${routeId}`);
@@ -289,10 +263,6 @@
     }
 }
 
-
-
-
-
 //   function closePopup() {
 //     console.log("❌ Closing popup...");
 //     let popup = document.getElementById("stop-popup");
@@ -301,14 +271,7 @@
 //     }
 // }
 
-
-
-
-
-
-
-
-  // ✅ Function to Show Stop Pop-up
+  // Function to Show Stop Pop-up (Expired/Unimplemented) As of March 14, 2025
   function showStopPopup(stop) {
     // ✅ Close any existing popups before opening a new one
     closePopup();
@@ -413,23 +376,16 @@
 // ✅ Define close functions correctly
 let busTimesPopup;
 
+// Closes the BusTimespopup (should not be needed) will be fixed w/ next update
 function closeBusTimesPopup() {
     if (busTimesPopup) busTimesPopup.style.display = "none";
 }
 
+// same should be updated
 function closePopup() {
     let popup = document.getElementById("stop-popup");
     if (popup) popup.style.display = "none";
 }
-
-
-
-
-
-
-
-
-
 
 // // ✅ Make sure closePopup() is globally available
 // window.showStopPopup = showStopPopup;
@@ -438,17 +394,7 @@ function closePopup() {
 //     if (popup) popup.style.display = "none";
 // };
 
-
-
-
-
-
-
-
-
-
-
-
+  // Shows selected route from sidebar
   function showRouteSelectionPopup(stopId, routes) {
     let popup = document.getElementById("stop-popup");
 
@@ -489,14 +435,7 @@ function closePopup() {
     });
   }
 
-
-
-
-
-
-
-
-
+  // loads bus stops when the api will be fixed
   async function loadBusStops(google) {
     const data = await loadGTFSData();
     if (!data || !data.stops) {
@@ -560,10 +499,7 @@ function closePopup() {
     console.log(`✅ Loaded ${stops.length} stops`);
   }
 
-
-
-
-
+  // loader
   onMount(async () => {
     try {
       const loader = new GoogleMapsLoader.Loader({
@@ -597,6 +533,7 @@ function closePopup() {
     }
   });
 
+  // log for Umo app button
   function addUmoAppButton() {
     const umoButton = document.createElement("button");
     umoButton.style.position = "absolute";
@@ -640,6 +577,7 @@ function closePopup() {
     document.body.appendChild(umoButton);
   }
 
+  // log for Donation button
   function addDonationButton() {
       const donationButton = document.createElement("button");
       donationButton.style.position = "absolute";
@@ -671,6 +609,7 @@ function closePopup() {
 
   let activeRouteId = null; // ✅ Store currently active route
 
+  // log for Bus List button
   function addBusListButton() {
       const busListButton = document.createElement("button");
       busListButton.style.position = "absolute";
@@ -800,7 +739,7 @@ function closePopup() {
       addBusListButton();
   });
 
-
+  // for smooth bus moves instead of straight position update
   function smoothMoveMarker(marker, newPosition) {
     if (!marker || !newPosition) return;
 
@@ -842,6 +781,7 @@ function closePopup() {
     }, 50);
 }
 
+  // calculates the direction for busesusing old n new positions
   function calculateHeading(previousPosition, newPosition) {
     if (!previousPosition) return 0;
 
@@ -860,6 +800,7 @@ function closePopup() {
   // ✅ Define previousBusData globally before using it
 let previousBusData = null; 
 
+    // Fetches live bus positions w/ use of API
     async function fetchLiveBusPositions(google) {
         try {
             console.log("📡 Fetching live bus data from TransitLive...");
