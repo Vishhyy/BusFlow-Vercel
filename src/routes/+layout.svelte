@@ -1,13 +1,6 @@
 <script>
-  export let data;
+    import '../app.css'; // Import your global styles
+    // other imports or script logic...
 </script>
-
-<style>
-  :global(body) {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-  }
-</style>
 
 <slot />

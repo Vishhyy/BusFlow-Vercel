@@ -9,6 +9,6 @@
     "esModuleInterop": true,
     "module": "esnext"
   },
-  "include": ["src"],
+  "include": ["src", "backup/animations.js", "backup/busIconLoader.js", "backup/busPosLoader.js", "backup/busStopLoader.js", "backup/busTimesLoader.js", "backup/globalVars.js", "backup/calculations.js", "backup/buttonLoader.js", "backup/animations.js"],
   "exclude": ["node_modules", ".svelte-kit", "build"]
 }

@@ -1,0 +1,78 @@
+/src
+│── /lib
+│   ├── GoogleMap.svelte  # Main component rendering the map
+│   ├── animations.js  # Handles smooth animations
+│   ├── calculations.js  # Math-related functions
+│   ├── busPosLoader.js  # Fetches live bus positions
+│   ├── buttonLoader.js  # Adds interactive UI buttons
+│   ├── busStopLoader.js  # Handles bus stop markers & popups
+│   ├── busIconLoader.js  # Handles bus icons, colors, and movements
+│   ├── processGTFS.js  # Parses GTFS data & route loading
+│   ├── busTimesLoader.js  # Fetches live bus arrival times
+│   ├── globals.js  # Stores global variables
+
+// main file calling functions GooogleMap.svelte
+
+onMount // for map and buses
+
+// function file for animations -> animations.js
+
+function smoothMoveMarker -> done
+
+// function file for calculations   -> calculations.js
+
+function calculateHeading   -> done
+
+// function file for live bus postions  -> busPosLoader.js
+
+async function fetchLiveBusPositions    -> done
+
+// function file for buttons    -> buttonLoader.js
+
+function addUmoAppButton        -> done
+function addDonationButton      -> done
+function addBusListButton       -> done
+
+// function file for busstops   -> busStopLoader.js
+
+function showBusTimesPopup          -> done
+function showStopPopup              -> done
+function closeBusTimesPopup         -> done
+function closePopup                 -> done
+function showRouteSelectionPopup    -> done
+async function loadBusStops         -> done
+
+// function file for busdesign      -> busIconLoader.js
+
+function createBusIcon              -> done
+function getBusColor                -> done
+function updateArrowDirection       -> done
+function updateBusPosition          -> done
+
+// function file for loading GTFS data such as routes       -> processGTFS.js
+
+function parseCSV                       -> done
+export async function loadGTFSData      -> done
+async function toggleRouteVisibility    -> done
+async function fetchAvailableRoutes     -> done
+
+// function file for live bus times     -> busTimesLoader.js
+
+async function fetchBusTimes        -> done
+
+// function file for global variables   -> globals.js
+
+let map;
+let isSidebarOpen = false;
+let selectedRoutes = [];
+let busMarkers = {}; // Stores bus marker elements
+let routePolylines = {}; // Stores route polylines for visibility toggling
+let previousBusPositions = {}; // Stores previous bus positions for smooth animation
+let arrowMarkers = {}; // Stores directional arrow markers for buses
+let isDarkMode = false;
+let stopMarkers = {}; // Stores bus stop markers
+let stopOverlays = []; // Stores stop overlays
+let activePopup = null; // Tracks currently open pop-up
+let busTimesPopup;
+let activeRouteId = null;
+let previousBusData = null;
