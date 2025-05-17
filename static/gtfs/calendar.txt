@@ -1,0 +1,7 @@
+service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date
+202501-MVS-Sunday-01,0,0,0,0,0,0,1,20250112,20250427
+202501-MVS-Weekday-01,1,1,1,1,1,0,0,20250113,20250502
+202501-MVS-Saturday-01,0,0,0,0,0,1,0,20250118,20250503
+202502-MVS-Sunday-01,0,0,0,0,0,0,1,20250504,20250817
+202502-MVS-Weekday-01,1,1,1,1,1,0,0,20250505,20250822
+202502-MVS-Saturday-01,0,0,0,0,0,1,0,20250510,20250823
