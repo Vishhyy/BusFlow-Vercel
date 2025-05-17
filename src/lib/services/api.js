@@ -1,6 +1,6 @@
 // URLs from your environment variables or directly defined
 const LIVE_BUS_API_URL = import.meta.env.VITE_API_URL;
-const TIMING_API_BASE_URL = 'https://stark-headland-53423-ad8df5faf2c9.herokuapp.com/api/bus-timings'; // Your old API
+const STOP_TIMES_PROXY_BASE_URL = '/api/stop-times'; 
 
 /**
  * Fetches live bus positions.
@@ -49,27 +49,43 @@ export async function fetchLiveBusPositions() {
 }
 
 
-// --- Functions for the older/unimplemented Timing API ---
+// --- MODIFIED/NEW Functions for Stop Times using transitlive.com proxy ---
 
 /**
- * Fetches available route IDs for a specific stop from the old API.
+ * Fetches predicted bus times for a specific stop using the new API.
+ * The new API seems to give times for all routes at that stop.
+ * @param {string} stopId
+ * @returns {Promise<Array|Object|null>} Parsed JSON data from the API or null on error.
+ *                                      The structure depends on the actual API response.
  */
-export async function fetchAvailableRoutesForStop(stopId) {
-    if (!stopId) return [];
-    console.log(`🔍 Fetching routes for stop: ${stopId}`);
-    // Increase limit significantly to get all routes for the stop
-    const apiUrl = `${TIMING_API_BASE_URL}?stop=${stopId}&routes=all&lim=100&skip=0&ws=0`;
+export async function fetchTimesForStop(stopId) {
+    if (!stopId) {
+        console.error("fetchTimesForStop: stopId is required.");
+        return null; // Or throw error
+    }
+    const apiUrl = `${STOP_TIMES_PROXY_BASE_URL}?stop=${encodeURIComponent(stopId)}`;
+    console.log(`API Service: Fetching stop times from proxy: ${apiUrl}`);
+
     try {
         const response = await fetch(apiUrl);
-        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: "Failed to parse error response" }));
+            console.error(`API Service: Error fetching stop times for stop ${stopId} from proxy. Status: ${response.status}`, errorData);
+            throw new Error(`HTTP error ${response.status} from stop times proxy: ${errorData.details || errorData.error}`);
+        }
         const data = await response.json();
-        // Extract unique route IDs
-        const uniqueRoutes = [...new Set(data.map(bus => bus.route_id))];
-         console.log(`✅ Found routes for stop ${stopId}:`, uniqueRoutes);
-        return uniqueRoutes;
+        // console.log(`API Service: Successfully fetched stop times for ${stopId}:`, data);
+
+        // IMPORTANT: You MUST inspect the 'data' structure here.
+        // If transitlive.com returned HTML via your proxy (because it was the original format),
+        // data might be { htmlContent: "<html>..." }.
+        // If it returned JSON directly, data will be that JSON.
+        // You need to adapt StopPopup.svelte to handle this structure.
+        return data;
+
     } catch (error) {
-        console.error(`❌ Error fetching available routes for stop ${stopId}:`, error);
-        return []; // Return empty array on error
+        console.error(`API Service: Exception fetching/parsing stop times for stop ${stopId}:`, error);
+        return null; // Return null or re-throw to be handled by caller
     }
 }
 

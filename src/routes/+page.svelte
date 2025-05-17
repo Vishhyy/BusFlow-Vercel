@@ -1,5 +1,6 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
+    import { get } from 'svelte/store';
 	import * as GoogleMapsLoader from '@googlemaps/js-api-loader';
 	import {
 		mapInstance,
@@ -10,14 +11,17 @@
 		selectedStop,
 		isBusListPopupOpen,
 		activeRoutePolylines,
-		visibleStopOverlays,
-		isMapReady // Store to track map readiness
+		visibleStopOverlays, // visibleStopOverlays might not be used directly here anymore
+		isMapReady
 	} from '$lib/stores.js';
 	import { loadGTFSData } from '$lib/services/gtfsProcessing.js';
-	//   import { loadKMLData } from '$lib/services/gtfsProcessing.js';
 	import { fetchLiveBusPositions } from '$lib/services/api.js';
-	import { loadBusStops, updateBusMarkers } from '$lib/services/mapActions.js';
-	// import { darkModeStyles, lightModeStyles } from '$lib/utils.js'; // No longer needed for map styling
+	// Import all necessary functions from mapActions
+	import {
+		updateVisibleStops,
+		updateBusMarkers,
+		displaySingleRoute
+	} from '$lib/services/mapActions.js';
 	import { browser } from '$app/environment';
 
 	// Import UI Components
@@ -27,41 +31,54 @@
 
 	// --- Constants ---
 	const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-	const mapId = import.meta.env.VITE_GOOGLE_MAPS_ID; // Keep Map ID for Cloud Styling
-	const FETCH_INTERVAL_MS = 2000; // Original interval (7 seconds)
+	const mapId = import.meta.env.VITE_GOOGLE_MAPS_ID; // Using Cloud Styling
+	const FETCH_INTERVAL_MS = 7000; // Live bus update interval
 
 	// --- Local State ---
 	let mapContainerElement;
-	let fetchIntervalId = null; // Store the interval ID
+	let fetchIntervalId = null;
 	let initializationError = null;
+	let mapIdleListener = null; // To store the Google Maps event listener
 
 	// --- Reactive Updates ---
-	// Only toggle body class based on isDarkMode store
+	// Toggles body class for dark mode (if other UI elements use it)
 	$: if (browser && $isDarkMode !== undefined) {
-		console.log(`Toggling body class for dark mode: ${$isDarkMode}`);
+		// console.log(`Toggling body class for dark mode: ${$isDarkMode}`);
 		document.body.classList.toggle('dark-mode', $isDarkMode);
 	}
 
-	// Update bus markers when live data changes, requires map readiness
+	// Update bus markers when live data changes and map is ready
 	$: if ($isMapReady && $googleInstance && $mapInstance && $liveBusData) {
 		updateBusMarkers($liveBusData);
 	}
 
+	// --- Event Handlers ---
+	function handleRouteSelectionFromPopup(routeId) {
+		console.log('+page.svelte: Route selection changed to:', routeId);
+		displaySingleRoute(routeId); // Show the selected route's line or clear all if null
+
+		// When a route is selected/cleared, re-evaluate visible stops.
+		// If we later implement route-specific stop filtering, updateVisibleStops
+		// would need to be aware of the selected route.
+		// For now, it just respects zoom and bounds.
+		if ($isMapReady && get(gtfsData)?.stops?.length > 0) {
+			updateVisibleStops();
+		}
+	}
+
 	// --- Lifecycle Functions ---
 	onMount(async () => {
-		if (!browser) return;
+		if (!browser) return; // Should always be true for onMount
 
 		initializationError = null;
-		$isMapReady = false;
+		$isMapReady = false; // Ensure map readiness is false initially
+		document.body.classList.toggle('dark-mode', $isDarkMode); // Set initial body class
 
 		if (!apiKey || !mapId) {
-			initializationError = 'Map API Key or Map ID is missing.';
+			initializationError = 'Map API Key or Map ID is missing in environment variables.';
 			console.error(initializationError);
 			return;
 		}
-
-		// Set initial body class
-		document.body.classList.toggle('dark-mode', $isDarkMode);
 
 		try {
 			console.log('🚀 Initializing Map Loader...');
@@ -72,15 +89,17 @@
 			});
 			const google = await loader.load();
 
-			if (!mapContainerElement || !google)
-				throw new Error('Map container missing or Maps Loader failed.');
+			if (!mapContainerElement || !google) {
+				// Check if component unmounted during async load
+				throw new Error('Map container reference lost or Google Maps Loader failed.');
+			}
 			googleInstance.set(google);
-			console.log(' Google Maps API loaded.');
+			console.log('✅ Google Maps API loaded.');
 
 			console.log('🗺️ Creating Map Instance with Map ID:', mapId);
 			const map = new google.maps.Map(mapContainerElement, {
-				center: { lat: 50.4452, lng: -104.6189 },
-				zoom: 12,
+				center: { lat: 50.4452, lng: -104.6189 }, // Regina, SK
+				zoom: 12, // Initial zoom
 				mapId: mapId,
 				disableDefaultUI: true,
 				zoomControl: true,
@@ -92,82 +111,118 @@
 			mapInstance.set(map);
 			console.log('✅ Map Instance Created.');
 
-			isMapReady.set(true); // Mark map as ready
+			// Map is now created, mark as ready
+			isMapReady.set(true);
 			console.log('🚩 Map is Ready');
 
-			// --- Load Data ---
-			console.log('⏳ Loading static GTFS data...');
-			const staticData = await loadGTFSData(); // This now fetches and parses your new files
-			gtfsData.set(staticData);
-			console.log('✅ Static GTFS data loaded into store.');
-			loadBusStops();
+			// Add map 'idle' listener to update stops when map movement ends
+			mapIdleListener = map.addListener('idle', () => {
+				// console.log("Map idle, attempting to update visible stops.");
+				if (get(isMapReady) && get(gtfsData)?.stops?.length > 0) {
+					updateVisibleStops();
+				} else {
+					// console.log("Skipping stop update: Map not ready or no GTFS stops.");
+				}
+			});
+			console.log('👂 Map idle listener attached.');
 
+			// --- Load Static GTFS Data ---
+			console.log('⏳ Loading static GTFS data...');
+			const staticData = await loadGTFSData();
+			if (!staticData || !staticData.routes || !staticData.stops) {
+				// Basic check
+				throw new Error('GTFS data loading failed or returned invalid structure.');
+			}
+			gtfsData.set(staticData);
+			console.log(
+				'✅ Static GTFS data loaded into store. Routes:',
+				staticData.routes.length,
+				'Stops:',
+				staticData.stops.length,
+				'Shapes:',
+				Object.keys(staticData.shapes).length
+			);
+
+			// Initial call to render stops for the current view (after GTFS is loaded)
+			updateVisibleStops();
+
+			// --- Fetch Live Bus Data ---
 			console.log('🚌 Initial bus data fetch...');
 			const initialBusData = await fetchLiveBusPositions();
-			liveBusData.set(initialBusData);
+			liveBusData.set(initialBusData); // Triggers reactive updateBusMarkers
 
-			// --- Use setInterval as originally ---
-			console.log(`🔄 Starting update interval (${FETCH_INTERVAL_MS}ms)...`);
+			console.log(`🔄 Starting live bus update interval (${FETCH_INTERVAL_MS}ms)...`);
 			fetchIntervalId = setInterval(async () => {
-				// Fetch only if browser tab visible and map is ready
 				if (!document.hidden && $isMapReady) {
+					// Only fetch if tab active and map ready
 					try {
-						// console.log("Interval: Fetching bus data..."); // Less frequent log
 						const newData = await fetchLiveBusPositions();
 						if (JSON.stringify(newData) !== JSON.stringify($liveBusData)) {
 							liveBusData.set(newData);
 						}
 					} catch (err) {
-						console.error('Error fetching in interval:', err);
+						console.error('Error fetching live bus data in interval:', err);
 					}
 				}
-			}, FETCH_INTERVAL_MS); // Use the constant
+			}, FETCH_INTERVAL_MS);
 
-			console.log('✅ Full Initialization Complete.');
+			console.log('🎉 Full Initialization Complete.');
 		} catch (error) {
 			console.error('❌ Error during map/data initialization:', error);
-			initializationError = `Failed to initialize map: ${error.message || error}`;
-			isMapReady.set(false);
+			initializationError = `Failed to initialize: ${error.message || String(error)}`;
+			isMapReady.set(false); // Ensure map is not marked as ready on error
 		}
 	});
 
 	onDestroy(() => {
 		console.log('🧹 Component destroying...');
-		const currentGoogle = $googleInstance;
-		const currentMap = $mapInstance;
-		const mapWasReady = $isMapReady;
+		const currentGoogle = get(googleInstance); // Use get() for potentially null values
+		const currentMap = get(mapInstance);
+		// const mapWasReady = get(isMapReady); // Not strictly needed here for listener removal
 
 		if (browser) {
+			// All cleanup should be browser-only
 			console.log('🧹 Cleaning up browser resources...');
-			// --- Clear the Interval ---
+
+			// Clear live bus update interval
 			if (fetchIntervalId) {
-				clearInterval(fetchIntervalId); // Use clearInterval
-				console.log(' Fetch interval cleared.');
+				clearInterval(fetchIntervalId);
+				console.log(' Live update interval cleared.');
 				fetchIntervalId = null;
 			}
 
-			// Cleanup map listeners
-			if (
-				mapWasReady &&
-				currentGoogle &&
-				typeof currentGoogle.maps === 'object' &&
-				currentGoogle.maps !== null &&
-				currentMap
-			) {
+			// Remove map idle listener
+			if (mapIdleListener) {
+				console.log(' Removing map idle listener.');
+				// google.maps.event.removeListener(mapIdleListener) is for older listeners
+				// For listeners added with map.addListener('event', handler), just call .remove() on the listener object
 				try {
-					currentGoogle.maps.event.clearInstanceListeners(currentMap);
-					console.log(' Map listeners cleared.');
+					mapIdleListener.remove();
 				} catch (e) {
-					console.warn(' Error clearing map listeners:', e);
+					console.warn('Error removing map idle listener:', e);
 				}
-			} else {
-				console.log(' Skipping listener cleanup: Instances not available/ready at destroy.');
+				mapIdleListener = null;
 			}
 
-			document.body.classList.remove('dark-mode');
+			// Clear Google Maps instance listeners (general cleanup)
+			if (currentGoogle?.maps?.event && currentMap) {
+				try {
+					currentGoogle.maps.event.clearInstanceListeners(currentMap);
+					console.log(' General map instance listeners cleared.');
+				} catch (e) {
+					console.warn(' Error clearing general map instance listeners:', e);
+				}
+			} else {
+				console.log(' Skipping general map listener cleanup: Google/Map instance not available.');
+			}
+
+			// Optional: Command mapActions to clear its managed markers if it has a specific cleanup function
+			// e.g., clearAllStopMarkers(); clearAllBusMarkers();
+
+			document.body.classList.remove('dark-mode'); // Clean up body class
 		}
 
-		// Reset stores
+		// Reset Svelte stores
 		console.log(' Resetting stores...');
 		mapInstance.set(null);
 		googleInstance.set(null);
@@ -178,24 +233,28 @@
 		isDarkMode.set(false);
 		isBusListPopupOpen.set(false);
 		activeRoutePolylines.set({});
-		visibleStopOverlays.set([]);
+		visibleStopOverlays.set([]); // This store is managed by mapActions.js directly if it keeps track
 		console.log(' Cleanup complete.');
 	});
 </script>
 
 <!-- Map Container & UI Components -->
 <div bind:this={mapContainerElement} id="map-container">
-	{#if !browser}
-		<p>Loading map...</p>
+	{#if !browser && typeof window === 'undefined'}
+		<!-- Show only during true SSR, not client-side pre-hydration -->
+		<p class="ssr-placeholder">Loading map application...</p>
 	{:else if initializationError}
 		<div class="error-indicator">Error: {initializationError}</div>
 	{:else if !$isMapReady}
-		<div class="loading-indicator">Loading Map...</div>
+		<div class="loading-indicator">Initializing Map & Data...</div>
 	{/if}
+	<!-- Map is always in DOM for Google Maps to attach to, visibility of content managed by isMapReady -->
 </div>
-{#if $isMapReady}
+
+{#if $isMapReady && browser}
+	<!-- Ensure components only render client-side when map is ready -->
 	<MapControls />
-	<BusListPopup />
+	<BusListPopup onRouteSelect={handleRouteSelectionFromPopup} />
 	<StopPopup />
 {/if}
 
@@ -206,12 +265,23 @@
 		position: absolute;
 		top: 0;
 		left: 0;
-		background-color: #f0f0f0;
+		background-color: #f0f0f0; /* Light placeholder */
 		z-index: 0;
 	}
 	:global(body) {
 		margin: 0;
-		font-family: system-ui, sans-serif;
+		font-family:
+			system-ui,
+			-apple-system,
+			BlinkMacSystemFont,
+			'Segoe UI',
+			Roboto,
+			Oxygen,
+			Ubuntu,
+			Cantarell,
+			'Open Sans',
+			'Helvetica Neue',
+			sans-serif;
 		overflow: hidden;
 		background-color: #fff;
 	}
@@ -220,22 +290,28 @@
 		color: #eee;
 	}
 	:global(body.dark-mode) #map-container {
-		background-color: #333;
+		background-color: #333; /* Darker placeholder */
 	}
+
 	.loading-indicator,
-	.error-indicator {
+	.error-indicator,
+	.ssr-placeholder {
 		position: absolute;
 		top: 50%;
 		left: 50%;
 		transform: translate(-50%, -50%);
-		padding: 10px 20px;
-		background: rgba(0, 0, 0, 0.8);
+		padding: 15px 25px;
+		background: rgba(0, 0, 0, 0.85);
 		color: white;
-		border-radius: 5px;
+		border-radius: 8px;
 		z-index: 10;
 		text-align: center;
+		font-size: 1.1em;
 	}
 	.error-indicator {
-		background: rgba(200, 0, 0, 0.8);
+		background: rgba(200, 0, 0, 0.85);
+	}
+	.ssr-placeholder {
+		background: rgba(50, 50, 50, 0.85);
 	}
 </style>

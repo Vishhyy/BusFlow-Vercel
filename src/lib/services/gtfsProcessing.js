@@ -63,10 +63,10 @@ export async function loadGTFSData() {
             tripsText,
             shapesText
         ] = await Promise.all([
-            fetch(filePaths.routes).then(res => { if(!res.ok) throw new Error(`Fetch failed for ${filePaths.routes}`); return res.text(); }),
-            fetch(filePaths.stops).then(res => { if(!res.ok) throw new Error(`Fetch failed for ${filePaths.stops}`); return res.text(); }),
-            fetch(filePaths.trips).then(res => { if(!res.ok) throw new Error(`Fetch failed for ${filePaths.trips}`); return res.text(); }),
-            fetch(filePaths.shapes).then(res => { if(!res.ok) throw new Error(`Fetch failed for ${filePaths.shapes}`); return res.text(); })
+            fetch(filePaths.routes).then(res => { if (!res.ok) throw new Error(`Fetch failed for ${filePaths.routes}`); return res.text(); }),
+            fetch(filePaths.stops).then(res => { if (!res.ok) throw new Error(`Fetch failed for ${filePaths.stops}`); return res.text(); }),
+            fetch(filePaths.trips).then(res => { if (!res.ok) throw new Error(`Fetch failed for ${filePaths.trips}`); return res.text(); }),
+            fetch(filePaths.shapes).then(res => { if (!res.ok) throw new Error(`Fetch failed for ${filePaths.shapes}`); return res.text(); })
         ]);
 
         // --- 1. Parse Routes ---
@@ -107,7 +107,7 @@ export async function loadGTFSData() {
                 if (!rawShapes[shapeId]) {
                     rawShapes[shapeId] = [];
                 }
-                rawShapes[shapeId].push({ lat, lng, sequence });
+                rawShapes[shapeId].push({ lat: lat, lng: lon, sequence: sequence });
             }
         });
 
