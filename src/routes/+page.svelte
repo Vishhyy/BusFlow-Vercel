@@ -20,7 +20,8 @@
 	import {
 		updateVisibleStops,
 		updateBusMarkers,
-		displaySingleRoute
+		displaySingleRoute,
+		displayMultipleRoutes
 	} from '$lib/services/mapActions.js';
 	import { browser } from '$app/environment';
 
@@ -52,19 +53,34 @@
 		updateBusMarkers($liveBusData);
 	}
 
-	// --- Event Handlers ---
-	function handleRouteSelectionFromPopup(routeId) {
-		console.log('+page.svelte: Route selection changed to:', routeId);
-		displaySingleRoute(routeId); // Show the selected route's line or clear all if null
+	function handleRouteSelectionChangeFromBusList(selectedIdsArray) { // Expects an array
+        console.log("+page.svelte: Route selection array changed to:", selectedIdsArray);
+        displayMultipleRoutes(selectedIdsArray);
 
-		// When a route is selected/cleared, re-evaluate visible stops.
-		// If we later implement route-specific stop filtering, updateVisibleStops
-		// would need to be aware of the selected route.
-		// For now, it just respects zoom and bounds.
-		if ($isMapReady && get(gtfsData)?.stops?.length > 0) {
-			updateVisibleStops();
-		}
-	}
+        // Stop filtering logic for multiple routes is more complex.
+        // For now, let's assume if any route is selected, we MIGHT want to show all stops,
+        // or if specific stop filtering is needed, it would have to process all selectedIdsArray.
+        // This part needs careful thought for UX.
+        if (selectedIdsArray.length === 0) {
+            console.log("+page.svelte: All route filters cleared, ensuring all stops are visible.");
+            loadBusStops(); // Call without args to show all stops (current behavior)
+        } else {
+            console.warn(`+page.svelte: Stop filtering for multiple routes not yet implemented. All stops remain visible.`);
+            // To filter for multiple routes, loadBusStops would need to accept an array
+            // loadBusStops(selectedIdsArray);
+        }
+    }
+
+	// --- Event Handlers ---
+	// handleRouteSelectionFromPopup (for StopPopup) can still use displaySingleRoute
+    function handleRouteSelectionFromStopPopup(routeId) {
+        console.log("+page.svelte: Single route selected from StopPopup:", routeId);
+        displaySingleRoute(routeId); // This now calls displayMultipleRoutes internally
+
+        // Stop filtering logic as before for single route from StopPopup
+        if (routeId === null) { loadBusStops(); }
+        else { /* console.warn for stop filtering */ }
+    }
 
 	// --- Lifecycle Functions ---
 	onMount(async () => {
@@ -238,6 +254,8 @@
 	});
 </script>
 
+// <BusListPopup onRouteSelectionChange={handleRouteSelectionChangeFromBusList} />
+
 <!-- Map Container & UI Components -->
 <div bind:this={mapContainerElement} id="map-container">
 	{#if !browser && typeof window === 'undefined'}
@@ -251,11 +269,10 @@
 	<!-- Map is always in DOM for Google Maps to attach to, visibility of content managed by isMapReady -->
 </div>
 
-{#if $isMapReady && browser}
-	<!-- Ensure components only render client-side when map is ready -->
-	<MapControls />
-	<BusListPopup onRouteSelect={handleRouteSelectionFromPopup} />
-	<StopPopup />
+{#if $isMapReady && browser }
+    <MapControls />
+    <BusListPopup onRouteSelectionChange={handleRouteSelectionChangeFromBusList} />
+    <StopPopup /> 
 {/if}
 
 <style>

@@ -1,211 +1,177 @@
-// src/lib/services/mapActions.js
 import { get } from 'svelte/store';
 import {
-    mapInstance, googleInstance, gtfsData, isMapReady, selectedStop, activeRoutePolylines
+    mapInstance, googleInstance, activeRoutePolylines, gtfsData,
+    isMapReady, selectedStop
 } from '$lib/stores.js';
 import { getBusColor, createBusIcon, calculateHeading, smoothMoveMarker } from '$lib/utils.js';
-// Assuming createStopMarkerElement is still relevant or you adapt it
-// function createStopMarkerElement(stop) { ... } - (defined as in previous example)
 
-let visibleStopMarkers = new Map(); // Use a Map to store markers by stop_id for efficient add/remove: { stop_id: AdvancedMarkerElement }
-const MIN_ZOOM_TO_RENDER_STOPS = 15; // Show stops only at zoom 15 or higher (REALLY CLOSE)
+// --- loadBusStops (viewport aware) ---
+let currentStopMarkersMap = new Map(); // Use a Map: { stop_id: AdvancedMarkerElement }
+const MIN_ZOOM_TO_RENDER_STOPS = 15;
 
-// Helper to create the stop marker (AdvancedMarkerElement)
 function createAndAddStopMarker(stop, map, google) {
-    // const el = createStopMarkerElement(stop); // Or your preferred way to create content
-    const el = document.createElement('div'); // Simple dot example
-    el.style.width = '8px'; el.style.height = '8px';
-    el.style.backgroundColor = 'rgba(0,100,255,0.8)'; // Blueish
-    el.style.borderRadius = '50%'; el.style.border = '1px solid white';
-    el.title = stop.stop_name;
-
-    const stopMarker = new google.maps.marker.AdvancedMarkerElement({
-        position: { lat: stop.stop_lat, lng: stop.stop_lon },
-        map: map,
-        title: stop.stop_name,
-        content: el,
-        // zIndex: 5, // Ensure they are below buses if needed
-    });
-
-    stopMarker.addListener('click', () => {
-        console.log(`🚏 Stop Marker clicked: ${stop.stop_id}`);
-        selectedStop.set({ id: stop.stop_id, lat: stop.stop_lat, lng: stop.stop_lon, name: stop.stop_name });
-    });
+    const el = document.createElement('div');
+    el.style.width = '8px'; el.style.height = '8px'; el.style.backgroundColor = 'rgba(0,100,255,0.8)';
+    el.style.borderRadius = '50%'; el.style.border = '1px solid white'; el.title = stop.stop_name;
+    const stopMarker = new google.maps.marker.AdvancedMarkerElement({ position: { lat: stop.stop_lat, lng: stop.stop_lon }, map: map, title: stop.stop_name, content: el });
+    stopMarker.addListener('click', () => { selectedStop.set({ id: stop.stop_id, lat: stop.stop_lat, lng: stop.stop_lon, name: stop.stop_name }); });
     return stopMarker;
 }
-
-
 export function updateVisibleStops() {
-    const map = get(mapInstance);
-    const google = get(googleInstance);
-    const allStops = get(gtfsData)?.stops; // Get all stops from the store
-    const ready = get(isMapReady);
-
-    if (!ready || !map || !google || !allStops || allStops.length === 0) {
-        // Clear any existing markers if prerequisites are not met
-        visibleStopMarkers.forEach(marker => marker.map = null);
-        visibleStopMarkers.clear();
-        // console.warn("updateVisibleStops: Prerequisites not met or no stops to process.");
-        return;
-    }
-
+    const map = get(mapInstance); const google = get(googleInstance); const allStops = get(gtfsData)?.stops; const ready = get(isMapReady);
+    if (!ready || !map || !google || !allStops || allStops.length === 0) { currentStopMarkersMap.forEach(marker => marker.map = null); currentStopMarkersMap.clear(); return; }
     const currentZoom = map.getZoom();
-
-    if (currentZoom < MIN_ZOOM_TO_RENDER_STOPS) {
-        // Zoomed out too far, remove all currently visible stop markers
-        if (visibleStopMarkers.size > 0) {
-            console.log(`Zoom level ${currentZoom} < ${MIN_ZOOM_TO_RENDER_STOPS}. Clearing ${visibleStopMarkers.size} stop markers.`);
-            visibleStopMarkers.forEach(marker => marker.map = null);
-            visibleStopMarkers.clear();
-        }
-        return;
-    }
-
-    const bounds = map.getBounds();
-    if (!bounds) {
-        console.warn("updateVisibleStops: Map bounds not available yet.");
-        return; // Map might not be fully initialized
-    }
-
-    const newVisibleStopIds = new Set(); // IDs of stops that should be visible
-
-    // Filter stops within the current map bounds
+    if (currentZoom < MIN_ZOOM_TO_RENDER_STOPS) { if (currentStopMarkersMap.size > 0) { currentStopMarkersMap.forEach(marker => marker.map = null); currentStopMarkersMap.clear(); } return; }
+    const bounds = map.getBounds(); if (!bounds) { return; }
+    const newVisibleStopIds = new Set();
     for (const stop of allStops) {
-        if (stop.stop_lat == null || stop.stop_lon == null || isNaN(stop.stop_lat) || isNaN(stop.stop_lon)) {
-            continue; // Skip invalid stops
-        }
+        if (stop.stop_lat == null || stop.stop_lon == null || isNaN(stop.stop_lat) || isNaN(stop.stop_lon)) continue;
         const stopLatLng = new google.maps.LatLng(stop.stop_lat, stop.stop_lon);
-        if (bounds.contains(stopLatLng)) {
-            newVisibleStopIds.add(stop.stop_id);
-            if (!visibleStopMarkers.has(stop.stop_id)) {
-                // This stop is in bounds and not currently on map, add it
-                const marker = createAndAddStopMarker(stop, map, google);
-                visibleStopMarkers.set(stop.stop_id, marker);
-            }
-        }
+        if (bounds.contains(stopLatLng)) { newVisibleStopIds.add(stop.stop_id); if (!currentStopMarkersMap.has(stop.stop_id)) { const marker = createAndAddStopMarker(stop, map, google); currentStopMarkersMap.set(stop.stop_id, marker); } }
     }
-
-    // Remove markers that are no longer in bounds (or became visible by other means)
     const markersToRemove = [];
-    visibleStopMarkers.forEach((marker, stopId) => {
-        if (!newVisibleStopIds.has(stopId)) {
-            markersToRemove.push(stopId);
-        }
-    });
-
-    markersToRemove.forEach(stopId => {
-        const marker = visibleStopMarkers.get(stopId);
-        if (marker) marker.map = null; // Remove from map
-        visibleStopMarkers.delete(stopId); // Remove from our tracking Map
-    });
-
-    // console.log(`Updated visible stops: ${visibleStopMarkers.size} markers now on map.`);
+    currentStopMarkersMap.forEach((marker, stopId) => { if (!newVisibleStopIds.has(stopId)) markersToRemove.push(stopId); });
+    markersToRemove.forEach(stopId => { const marker = currentStopMarkersMap.get(stopId); if (marker) marker.map = null; currentStopMarkersMap.delete(stopId); });
 }
 
-
-// --- Update Bus Markers (Live Data) ---
-// Keep your last working version of updateBusMarkers here
 const BUS_MARKER_GRACE_PERIOD_MS = 20000;
-let currentBusMarkers = {};
-let previousBusData = {};
-export function updateBusMarkers(liveBuses) { /* ... your full V5 smoothMoveMarker with grace period logic ... */
-    const map = get(mapInstance); const google = get(googleInstance); const ready = get(isMapReady);
-    if (!ready || !map || !google || !Array.isArray(liveBuses)) { return; }
-    const now = Date.now(); const activeBusIds = new Set();
-    liveBuses.forEach(bus => {
-        const busId = bus.properties?.b?.toString(); const routeId = bus.properties?.r?.toString(); if (!busId || !routeId) return;
-        const coords = bus.geometry?.coordinates; if (!Array.isArray(coords) || coords.length !== 2 || coords.some(c => c == null || isNaN(c))) { console.warn(`Invalid coords for Bus ${busId}`); return; }
-        const newPosition = { lat: parseFloat(coords[1]), lng: parseFloat(coords[0]) }; activeBusIds.add(busId);
-        const prevData = previousBusData[busId]; const heading = calculateHeading(prevData, newPosition);
-        const busColor = getBusColor(routeId); const busIconCanvas = createBusIcon(routeId, busColor, heading);
-        if (currentBusMarkers[busId]) {
-            const marker = currentBusMarkers[busId]; if (!marker) { delete currentBusMarkers[busId]; return; }
-            if (marker.heading !== heading || marker.color !== busColor) { try { marker.content = busIconCanvas; } catch (e) { } marker.heading = heading; marker.color = busColor; }
-            smoothMoveMarker(marker, newPosition, google);
-        } else {
-            try { const busMarker = new google.maps.marker.AdvancedMarkerElement({ position: newPosition, map: map, title: `Bus ${busId} - Route ${routeId}`, content: busIconCanvas, zIndex: 100 }); busMarker.heading = heading; busMarker.color = busColor; currentBusMarkers[busId] = busMarker; console.log(`➕ Added marker ${busId}`); } catch (e) { return; }
-        }
-        previousBusData[busId] = { ...newPosition, heading: heading, lastSeen: now };
-    });
-    Object.keys(currentBusMarkers).forEach(existingBusId => { if (!activeBusIds.has(existingBusId)) { const prevData = previousBusData[existingBusId]; if (prevData?.lastSeen) { const timeSinceLastSeen = now - prevData.lastSeen; if (timeSinceLastSeen > BUS_MARKER_GRACE_PERIOD_MS) { console.log(`➖ Removing inactive Bus ${existingBusId}`); const markerToRemove = currentBusMarkers[existingBusId]; if (markerToRemove) { try { if (markerToRemove.animationFrameId) cancelAnimationFrame(markerToRemove.animationFrameId); markerToRemove.map = null; } catch (e) { } } delete currentBusMarkers[existingBusId]; delete previousBusData[existingBusId]; } } else { console.warn(`Removing ${existingBusId} missing prev data.`); const markerToRemove = currentBusMarkers[existingBusId]; if (markerToRemove) { try { if (markerToRemove.animationFrameId) cancelAnimationFrame(markerToRemove.animationFrameId); markerToRemove.map = null; } catch (e) { } } delete currentBusMarkers[existingBusId]; } } });
-}
+let currentBusMarkers = {}; // Cache for marker elements: { busId: AdvancedMarkerElement }
+let previousBusData = {};   // Cache for previous position data: { busId: { lat, lng, heading, lastSeen } }
 
-
-// --- NEW/MODIFIED: Display Single Route Polyline ---
-export function displaySingleRoute(newRouteId) {
+export function updateBusMarkers(liveBuses) {
     const map = get(mapInstance);
     const google = get(googleInstance);
-    const currentGtfs = get(gtfsData); // Contains routes, shapes, routeToShapeMap
     const ready = get(isMapReady);
 
-    if (!ready || !map || !google || !currentGtfs?.shapes || !currentGtfs?.routeToShapeMap || !currentGtfs?.routes) {
-        console.warn("displaySingleRoute: Map not ready or core GTFS data missing.");
-        activeRoutePolylines.set({}); // Clear any polylines from store
+    if (!ready || !map || !google || !Array.isArray(liveBuses)) {
         return;
     }
 
-    let currentPolylinesInStore = get(activeRoutePolylines);
-    const newPolylinesMapForStore = {};
+    const now = Date.now();
+    const activeBusIds = new Set();
 
-    // 1. Clear all currently displayed polylines from the map
-    for (const routeIdKey in currentPolylinesInStore) {
-        if (currentPolylinesInStore[routeIdKey]) {
-            currentPolylinesInStore[routeIdKey].forEach(polyline => polyline.setMap(null));
-        }
-    }
-    console.log("displaySingleRoute: Cleared existing polylines from map.");
-
-    // 2. If a newRouteId is provided, draw its polylines
-    if (newRouteId) {
-        const shapeIds = currentGtfs.routeToShapeMap[newRouteId];
-        if (!shapeIds || shapeIds.length === 0) {
-            console.warn(`No shape IDs found for route ${newRouteId} in routeToShapeMap.`);
-            activeRoutePolylines.set({}); // Ensure store is empty
+    liveBuses.forEach(bus => {
+        const busId = bus.properties?.b?.toString();
+        const routeId = bus.properties?.r?.toString();
+        if (!busId || !routeId) {
+            // console.warn("Skipping bus update due to missing ID or route:", bus.properties);
             return;
         }
 
-        // Get route color from GTFS routes data or fallback
-        const routeInfo = currentGtfs.routes.find(r => r.route_id === newRouteId);
-        let routeColor = getBusColor(newRouteId); // Fallback to utility
-        if (routeInfo && routeInfo.route_color) {
-            routeColor = `#${routeInfo.route_color.replace('#', '')}`; // Ensure # prefix
+        const coords = bus.geometry?.coordinates;
+        if (!Array.isArray(coords) || coords.length !== 2 || coords.some(c => c == null || isNaN(c))) {
+            console.warn(`Invalid coordinates for Bus ${busId}:`, coords);
+            return;
         }
 
-        const polylinesToAddForThisRoute = [];
+        let newPositionLatLng;
+        try {
+            newPositionLatLng = new google.maps.LatLng(parseFloat(coords[1]), parseFloat(coords[0]));
+            if (isNaN(newPositionLatLng.lat()) || isNaN(newPositionLatLng.lng())) throw new Error("LatLng creation resulted in NaN");
+        } catch (e) {
+            console.error(`Error creating LatLng for newPosition (Bus ${busId}):`, e, coords);
+            return;
+        }
+        const newPositionObj = { lat: newPositionLatLng.lat(), lng: newPositionLatLng.lng() };
 
-        shapeIds.forEach(shapeId => {
-            const shapePoints = currentGtfs.shapes[shapeId];
-            if (!shapePoints || shapePoints.length < 2) {
-                console.warn(`Not enough points for shape_id ${shapeId} of route ${newRouteId}`);
-                return; // continue to next shapeId
+        activeBusIds.add(busId);
+
+        const prevData = previousBusData[busId];
+        const heading = calculateHeading(prevData, newPositionObj);
+        const busColor = getBusColor(routeId);
+        const busIconCanvas = createBusIcon(routeId, busColor, heading);
+
+        if (currentBusMarkers[busId]) {
+            const marker = currentBusMarkers[busId];
+            if (!marker) {
+                delete currentBusMarkers[busId];
+                delete previousBusData[busId];
+                return;
             }
-
-            try {
-                const path = shapePoints.map(p => new google.maps.LatLng(p.lat, p.lng));
-                const polyline = new google.maps.Polyline({
-                    path: path,
-                    geodesic: true,
-                    strokeColor: routeColor,
-                    strokeOpacity: 0.9,
-                    strokeWeight: 5, // Slightly thicker for visibility
-                    map: map,
-                    zIndex: 1 // Lower than bus markers
-                });
-                polylinesToAddForThisRoute.push(polyline);
-            } catch (e) {
-                console.error(`Error creating polyline for shape_id ${shapeId}:`, e);
+            if (marker.heading !== heading || marker.color !== busColor) {
+                try { marker.content = busIconCanvas; } catch (e) { console.error(`Error setting marker content for ${busId}`, e); }
+                marker.heading = heading; marker.color = busColor;
             }
-        });
-
-        if (polylinesToAddForThisRoute.length > 0) {
-            newPolylinesMapForStore[newRouteId] = polylinesToAddForThisRoute;
-            console.log(`🗺️ Displaying ${polylinesToAddForThisRoute.length} polyline(s) for route ${newRouteId}`);
+            // Add detailed logging here if smoothMoveMarker is still an issue
+            smoothMoveMarker(marker, newPositionObj, google);
         } else {
-            console.warn(`No valid polylines could be created for route ${newRouteId}. Shape IDs were: ${shapeIds.join(', ')}`);
+            try {
+                const busMarker = new google.maps.marker.AdvancedMarkerElement({
+                    position: newPositionLatLng, // Use LatLng instance
+                    map: map,
+                    title: `Bus ${busId} - Route ${routeId}`,
+                    content: busIconCanvas,
+                    zIndex: 100, // Make sure this is high enough
+                });
+                busMarker.heading = heading; busMarker.color = busColor;
+                currentBusMarkers[busId] = busMarker;
+                // console.log(`➕ Added marker for Bus ${busId}.`);
+            } catch (creationError) {
+                console.error(`Error creating AdvancedMarkerElement for bus ${busId}:`, creationError);
+                return;
+            }
         }
-    } else {
-        console.log("🗺️ Clearing all route polylines (newRouteId is null).");
-    }
+        previousBusData[busId] = { ...newPositionObj, heading: heading, lastSeen: now };
+    });
 
-    activeRoutePolylines.set(newPolylinesMapForStore); // Update the store
+    Object.keys(currentBusMarkers).forEach(existingBusId => {
+        if (!activeBusIds.has(existingBusId)) {
+            const prevData = previousBusData[existingBusId];
+            if (prevData?.lastSeen) {
+                const timeSinceLastSeen = now - prevData.lastSeen;
+                if (timeSinceLastSeen > BUS_MARKER_GRACE_PERIOD_MS) {
+                    // console.log(`➖ Removing marker for inactive Bus ${existingBusId}`);
+                    const markerToRemove = currentBusMarkers[existingBusId];
+                    if (markerToRemove) {
+                        try {
+                            if (markerToRemove.animationFrameId) cancelAnimationFrame(markerToRemove.animationFrameId);
+                            markerToRemove.map = null;
+                        } catch (removeError) { console.warn(`Error removing marker ${existingBusId}:`, removeError); }
+                    }
+                    delete currentBusMarkers[existingBusId];
+                    delete previousBusData[existingBusId];
+                }
+            } else {
+                // console.warn(`Removing marker for Bus ${existingBusId} (no prev timestamp).`);
+                const markerToRemove = currentBusMarkers[existingBusId];
+                if (markerToRemove) try { markerToRemove.map = null; } catch (e) { }
+                delete currentBusMarkers[existingBusId];
+            }
+        }
+    });
+}
+
+// --- Display Multiple/Single Route Polylines ---
+export function displayMultipleRoutes(selectedRouteIds = []) {
+    const map = get(mapInstance); const google = get(googleInstance); const currentGtfs = get(gtfsData); const ready = get(isMapReady);
+    if (!ready || !map || !google || !currentGtfs?.shapes || !currentGtfs?.routeToShapeMap || !currentGtfs?.routes) {
+        const currentPolylinesInStore = get(activeRoutePolylines);
+        for (const routeIdKey in currentPolylinesInStore) currentPolylinesInStore[routeIdKey]?.forEach(p => p.setMap(null));
+        activeRoutePolylines.set({}); return;
+    }
+    const currentPolylinesOnMap = get(activeRoutePolylines); const newPolylinesMapForStore = {};
+    for (const routeId of selectedRouteIds) {
+        const currentRouteIdStr = String(routeId).trim();
+        if (currentPolylinesOnMap[currentRouteIdStr]) {
+            newPolylinesMapForStore[currentRouteIdStr] = currentPolylinesOnMap[currentRouteIdStr]; newPolylinesMapForStore[currentRouteIdStr].forEach(p => p.setMap(map));
+        } else {
+            const shapeIds = currentGtfs.routeToShapeMap[currentRouteIdStr];
+            if (!shapeIds || shapeIds.length === 0) { console.warn(`No shape IDs for route ${currentRouteIdStr}`); continue; }
+            const routeInfo = currentGtfs.routes.find(r => String(r.route_id).trim() === currentRouteIdStr);
+            let routeColor = getBusColor(currentRouteIdStr); if (routeInfo?.route_color) routeColor = `#${routeInfo.route_color.replace('#', '')}`;
+            const polylinesForThisRoute = [];
+            shapeIds.forEach(shapeId => {
+                const currentShapeIdStr = String(shapeId).trim(); const shapePoints = currentGtfs.shapes[currentShapeIdStr];
+                if (shapePoints && shapePoints.length >= 2) { try { const path = shapePoints.map(p => new google.maps.LatLng(p.lat, p.lng)); const polyline = new google.maps.Polyline({ path, geodesic: true, strokeColor: routeColor, strokeOpacity: 0.8, strokeWeight: 4, map: map, zIndex: 1 }); polylinesForThisRoute.push(polyline); } catch (e) { console.error("Err creating polyline:", e); } }
+            });
+            if (polylinesForThisRoute.length > 0) newPolylinesMapForStore[currentRouteIdStr] = polylinesForThisRoute;
+        }
+    }
+    for (const existingRouteId in currentPolylinesOnMap) { if (!selectedRouteIds.includes(existingRouteId)) { currentPolylinesOnMap[existingRouteId].forEach(p => p.setMap(null)); } }
+    activeRoutePolylines.set(newPolylinesMapForStore);
+    // console.log(`Updated routes. Visible: ${Object.keys(newPolylinesMapForStore).join(',')}`);
+}
+export function displaySingleRoute(newRouteId) {
+    if (newRouteId === null || newRouteId === undefined) displayMultipleRoutes([]);
+    else displayMultipleRoutes([String(newRouteId).trim()]);
 }

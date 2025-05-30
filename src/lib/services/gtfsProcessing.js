@@ -121,34 +121,72 @@ export async function loadGTFSData() {
 
 
         // --- 4. Parse Trips to build routeToShapeMap ---
-        const tripsData = parseCSV(tripsText);
-        tripsData.forEach(trip => {
-            const routeId = trip.route_id;
-            const shapeId = trip.shape_id; // GTFS standard links trip to a shape
+        const tripsData = parseCSV(tripsText); // Assuming tripsText is loaded content of trips.txt
+        processedData.routeToShapeMap = {};    // Initialize as an empty object
 
-            if (routeId && shapeId) {
+        tripsData.forEach(trip => {
+            // --- CRITICAL: ENSURE routeId IS A TRIMMED STRING ---
+            const routeId = String(trip.route_id).trim();
+            const shapeId = String(trip.shape_id).trim(); // Also good practice for shapeId
+
+            if (routeId && shapeId && shapeId !== "") { // Ensure both exist and shapeId isn't just whitespace
                 if (!processedData.routeToShapeMap[routeId]) {
-                    processedData.routeToShapeMap[routeId] = new Set(); // Use a Set to store unique shape_ids
+                    processedData.routeToShapeMap[routeId] = new Set(); // Use a Set for unique shape_ids
                 }
                 processedData.routeToShapeMap[routeId].add(shapeId);
+            } else if (routeId && (!shapeId || shapeId.trim() === "")) {
+                // Optional: Log if a trip for a route is explicitly missing a shape_id
+                // console.warn(`[GTFS Processing] Trip (ID: ${trip.trip_id || 'N/A'}) for route_id '${routeId}' is missing a shape_id in trips.txt.`);
             }
         });
 
-        // Convert Sets to Arrays for routeToShapeMap
-        for (const routeId in processedData.routeToShapeMap) {
-            processedData.routeToShapeMap[routeId] = Array.from(processedData.routeToShapeMap[routeId]);
+        // Convert Sets to Arrays for the final routeToShapeMap structure
+        for (const routeIdKey in processedData.routeToShapeMap) {
+            processedData.routeToShapeMap[routeIdKey] = Array.from(processedData.routeToShapeMap[routeIdKey]);
         }
-        console.log(`Mapped ${Object.keys(processedData.routeToShapeMap).length} routes to shapes.`);
+        console.log(`[GTFS Processing] Finished mapping routes to shapes. Total routes with shapes: ${Object.keys(processedData.routeToShapeMap).length}.`);
+
+        // Diagnostic: Check a few specific route IDs that you know should exist
+        // const sampleRouteIds = ['1', '3', '1-43', '10-43']; // Add relevant IDs from your data
+        // sampleRouteIds.forEach(sampleId => {
+        //     if (processedData.routeToShapeMap[sampleId]) {
+        //         console.log(`[GTFS Processing] Route '${sampleId}' has shapes:`, processedData.routeToShapeMap[sampleId]);
+        //     } else {
+        //         console.warn(`[GTFS Processing] Route '${sampleId}' has NO shapes mapped.`);
+        //     }
+        // });
 
 
-        // --- Optional: Process stop_times.txt ---
-        // This file is crucial if you want to display stops IN ORDER for a selected route,
-        // or show arrival times. For now, we're just loading all stops and all route shapes.
-        // If you parse stop_times, you'd typically group them by trip_id, then link trip_id to route_id.
-        // You could then build a structure like: { route_id: { trip_id: [stop_id_1, stop_id_2, ...], ... } }
-
+        // Final check against routes.txt to see if any defined routes have no shapes
+        processedData.routes.forEach(route => {
+            const currentRouteIdKey = String(route.route_id).trim();
+            if (!processedData.routeToShapeMap[currentRouteIdKey] || processedData.routeToShapeMap[currentRouteIdKey].length === 0) {
+                console.warn(`[GTFS Processing] Data Check: Route '${currentRouteIdKey}' (${route.route_short_name || route.route_long_name}) from routes.txt has no associated shapes in trips.txt. It cannot be drawn.`);
+            }
+        });
 
         console.log(`✅ GTFS data successfully processed.`);
+
+        console.log("[GTFS Processing FINAL CHECK] ======= ROUTETOSHAPEMAP KEYS & TYPES =======");
+        const routeToShapeMapKeys = Object.keys(processedData.routeToShapeMap);
+        if (routeToShapeMapKeys.length > 0) {
+            console.log(`[GTFS Processing FINAL CHECK] Sample routeToShapeMap keys (first 10):`);
+            routeToShapeMapKeys.slice(0, 10).forEach(key => { // Log first 10
+                console.log(`  - Key: '${key}', Type: ${typeof key}, Has Shapes: ${!!processedData.routeToShapeMap[key]?.length}`);
+            });
+            const testRouteId = '3'; // The one failing in StopPopup
+            if (processedData.routeToShapeMap.hasOwnProperty(testRouteId)) {
+                console.log(`[GTFS Processing FINAL CHECK] routeToShapeMap['${testRouteId}'] (string key): exists, Shapes:`, processedData.routeToShapeMap[testRouteId]);
+            } else {
+                console.log(`[GTFS Processing FINAL CHECK] routeToShapeMap['${testRouteId}'] (string key): DOES NOT EXIST`);
+            }
+            if (processedData.routeToShapeMap.hasOwnProperty(Number(testRouteId))) {
+                console.log(`[GTFS Processing FINAL CHECK] routeToShapeMap[${Number(testRouteId)}] (numeric key): exists, Shapes:`, processedData.routeToShapeMap[Number(testRouteId)]);
+            } else {
+                console.log(`[GTFS Processing FINAL CHECK] routeToShapeMap[${Number(testRouteId)}] (numeric key): DOES NOT EXIST`);
+            }
+        } else { /* ... */ }
+
         return processedData;
 
     } catch (error) {

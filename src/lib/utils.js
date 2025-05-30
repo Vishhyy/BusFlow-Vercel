@@ -110,94 +110,82 @@ export function calculateHeading(previousPosition, newPosition) {
  * @param {number} duration - Animation duration in milliseconds.
  */
 export function smoothMoveMarker(marker, newPosition, google, duration = 1500) {
-
-    // --- Prerequisite Checks ---
     if (!marker || !newPosition || !google?.maps?.LatLng) {
-        console.warn("smoothMoveMarker V5: EXIT - Missing marker, newPosition, or google.maps.LatLng."); return;
-    }
-    const targetLat = parseFloat(newPosition.lat); const targetLng = parseFloat(newPosition.lng);
-    if (isNaN(targetLat) || isNaN(targetLng)) {
-        console.warn("smoothMoveMarker V5: EXIT - Invalid target coords:", newPosition);
-        try { if (marker) marker.position = { lat: targetLat, lng: targetLng }; } catch (e) {}
+        console.warn("smoothMoveMarker V5.2: EXIT - Missing marker, newPosition, or google.maps.LatLng.");
         return;
     }
 
-    // --- Determine Starting Position (V5 Logic) ---
-    let startLatLng;
-    const currentMarkerPos = marker.position;
-    let foundStartMethod = "None";
-
-    // Attempt 1: Use standard .lat() / .lng() methods ...
-    if (currentMarkerPos && typeof currentMarkerPos.lat === 'function' /* ... */) {
-        // ... logic using methods ...
-        foundStartMethod = ".lat()/.lng() methods";
-        try { startLatLng = new google.maps.LatLng(currentLat, currentLng); } catch (e) {/*...*/}
-   }
-
-   // Attempt 2: Check internal UC/VC properties
-   if (!startLatLng && currentMarkerPos && typeof currentMarkerPos === 'object' && currentMarkerPos !== null) {
-        const internalLat = currentMarkerPos.UC; const internalLng = currentMarkerPos.VC;
-        if (typeof internalLat === 'number' && !isNaN(internalLat) && typeof internalLng === 'number' && !isNaN(internalLng)) {
-            // *** CHANGE THIS LINE ***
-            // Change console.warn to console.log for less alarming output, or remove entirely
-            console.log('[smoothMoveMarker V5.1 START] Using INTERNAL UC/VC properties for start:', { internalLat, internalLng });
-            // console.warn was here previously
-            // *** END CHANGE ***
-            foundStartMethod = "Internal UC/VC"; // Still note how we got it
-            try { startLatLng = new google.maps.LatLng(internalLat, internalLng); } catch (e) {/*...*/}
-        }
-   }
-
-   // Attempt 3: Fallback ...
-   if (!startLatLng) {
-       foundStartMethod = "Fallback to Target";
-        console.warn('[smoothMoveMarker V5.1 START] FALLBACK - Using target as start.'); // Keep this as a WARN
-        try { startLatLng = new google.maps.LatLng(targetLat, targetLng); } catch (e) { console.error("smoothMoveMarker V5.1: FATAL - Fallback failed", e); return; }
-   } else if (foundStartMethod !== "Fallback to Target") {
-        // console.log(`[smoothMoveMarker V5.1 START] Determined start using: ${foundStartMethod}`); // Log success if NOT fallback
-   }
-
-
-    // --- Prepare Target LatLng ---
-     let targetLatLng;
-     try {
-         targetLatLng = new google.maps.LatLng(targetLat, targetLng);
-     } catch(e) { console.error("smoothMoveMarker V5: FATAL - Could not create targetLatLng.", e); return; }
-
-    // --- Check if Already at Target ---
-    const tolerance = 0.000001;
-    if (Math.abs(startLatLng.lat() - targetLatLng.lat()) < tolerance && Math.abs(startLatLng.lng() - targetLatLng.lng()) < tolerance) {
-         try { if (marker && (!marker.position || !marker.position.equals(targetLatLng))) { marker.position = targetLatLng; }} catch (e) {}
-         return;
+    const targetLat = parseFloat(newPosition.lat);
+    const targetLng = parseFloat(newPosition.lng);
+    if (isNaN(targetLat) || isNaN(targetLng)) {
+        console.warn("smoothMoveMarker V5.2: EXIT - Invalid target coords:", newPosition);
+        try { if (marker) marker.position = { lat: targetLat, lng: targetLng }; } catch (e) { }
+        return;
     }
 
-    // --- Animation Setup & Loop ---
+    let startLatLng;
+    const currentMarkerPos = marker.position; // Read the .position property
+
+    // --- Attempt to get LatLng from currentMarkerPos ---
+    if (currentMarkerPos) {
+        if (typeof currentMarkerPos.lat === 'function' && typeof currentMarkerPos.lng === 'function') {
+            // It behaves like a LatLng object, try calling methods
+            const sLat = currentMarkerPos.lat();
+            const sLng = currentMarkerPos.lng();
+            if (!isNaN(sLat) && !isNaN(sLng)) {
+                console.log('[smoothMoveMarker V5.2 START] Using .lat()/.lng() methods.');
+                startLatLng = new google.maps.LatLng(sLat, sLng);
+            } else {
+                console.warn('[smoothMoveMarker V5.2 START] .lat()/.lng() methods returned NaN.');
+            }
+        } else if (typeof currentMarkerPos.lat === 'number' && typeof currentMarkerPos.lng === 'number' && !isNaN(currentMarkerPos.lat) && !isNaN(currentMarkerPos.lng)) {
+            // It's a LatLngLiteral-like object {lat: number, lng: number}
+            console.log('[smoothMoveMarker V5.2 START] Using literal {lat, lng} object.');
+            startLatLng = new google.maps.LatLng(currentMarkerPos.lat, currentMarkerPos.lng);
+        }
+        // Add the UC/VC check as a last resort if the above failed and object exists
+        else if (typeof currentMarkerPos === 'object' && currentMarkerPos !== null &&
+            typeof currentMarkerPos.UC === 'number' && typeof currentMarkerPos.VC === 'number' &&
+            !isNaN(currentMarkerPos.UC) && !isNaN(currentMarkerPos.VC)) {
+            console.warn('[smoothMoveMarker V5.2 START] Using INTERNAL UC/VC properties.');
+            startLatLng = new google.maps.LatLng(currentMarkerPos.UC, currentMarkerPos.VC);
+        } else {
+            console.warn('[smoothMoveMarker V5.2 START] marker.position is unrecognized:', currentMarkerPos);
+        }
+    } else {
+        console.warn('[smoothMoveMarker V5.2 START] marker.position is null or undefined.');
+    }
+
+
+    if (!startLatLng) {
+        console.warn('[smoothMoveMarker V5.2 START] FALLBACK - Using target as start.');
+        startLatLng = new google.maps.LatLng(targetLat, targetLng);
+    }
+
+    const targetLatLng = new google.maps.LatLng(targetLat, targetLng);
+    const tolerance = 0.000001;
+    if (Math.abs(startLatLng.lat() - targetLatLng.lat()) < tolerance && Math.abs(startLatLng.lng() - targetLatLng.lng()) < tolerance) {
+        try { if (marker.position !== targetLatLng) marker.position = targetLatLng; } catch (e) { }
+        return;
+    }
+
     if (marker.animationFrameId) { cancelAnimationFrame(marker.animationFrameId); marker.animationFrameId = null; }
     const startTime = performance.now();
 
     function animateStep(timestamp) {
-         if (!marker || !google?.maps?.LatLng) { /* Stop if prerequisites disappear */ marker.animationFrameId=null; return; }
-
-        const elapsed = timestamp - startTime;
-        const fraction = Math.min(elapsed / duration, 1);
+        // ... (rest of animateStep as in V5, ensuring new google.maps.LatLng is used for setting position)
+        if (!marker || !google?.maps?.LatLng) { if (marker) marker.animationFrameId = null; return; }
+        const elapsed = timestamp - startTime; const fraction = Math.min(elapsed / duration, 1);
         const currentLat = startLatLng.lat() + (targetLatLng.lat() - startLatLng.lat()) * fraction;
         const currentLng = startLatLng.lng() + (targetLatLng.lng() - startLatLng.lng()) * fraction;
-
-        if (isNaN(currentLat) || isNaN(currentLng)) { /* Stop on NaN */ try{marker.position=targetLatLng;}catch(e){} marker.animationFrameId=null; return; }
-
-        // Set Position using new LatLng
-        try {
-             marker.position = new google.maps.LatLng(currentLat, currentLng);
-        } catch (e) { /* Stop on error */ console.error("[smoothMoveMarker V5 ANIM_ERR] SetPos:", e); marker.animationFrameId = null; return; }
-
-        // Continue or Finish
+        if (isNaN(currentLat) || isNaN(currentLng)) { try { marker.position = targetLatLng; } catch (e) { } marker.animationFrameId = null; return; }
+        try { marker.position = new google.maps.LatLng(currentLat, currentLng); }
+        catch (e) { console.error("Anim Err SetPos V5.2:", e); marker.animationFrameId = null; return; }
         if (fraction < 1) { marker.animationFrameId = requestAnimationFrame(animateStep); }
-        else { try { marker.position = targetLatLng; } catch (e) {} marker.animationFrameId = null; }
+        else { try { marker.position = targetLatLng; } catch (e) { } marker.animationFrameId = null; }
     }
-
-    // Start animation
     marker.animationFrameId = requestAnimationFrame(animateStep);
-} // --- End of smoothMoveMarker V5 ---
+}
 
 // Define dark mode styles for the map
 export const darkModeStyles = [
